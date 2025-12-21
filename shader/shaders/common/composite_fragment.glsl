@@ -102,10 +102,10 @@ void main() {
     // Calculamos la distorsión ANTES de leer la textura.
     vec2 adjTexcoord = texcoord;
 
-#if defined(UNDERWATER_REFRACTION) && UNDERWATER_REFRACTION == 1
+#if defined(REFRACTION) && REFRACTION == 1
     if (isEyeInWater == 1) {
         float speed = frameTimeCounter * 2.0;
-        float strength = 0.005; // Intensidad suave
+        float strength = 0.005 * REFRACTION_STRENGTH;
 
         // Distorsión senoidal simple (muy barata para la GPU)
         adjTexcoord.x += sin(texcoord.y * 10.0 + speed) * strength;
@@ -129,31 +129,26 @@ void main() {
     // --- OPTIMIZACIÓN 2: NIEBLA EXPONENCIAL ---
     // Underwater fog
     if(isEyeInWater == 1) {
+        vec3 water_tint_underwater = WATER_COLOR * direct_light_color * ((eye_bright_smooth.y * .8 + 48) * 0.004166666666666667);
+
 #if defined(UNDERWATER_FOG) && UNDERWATER_FOG == 1
-        // Usamos el slider de opacidad para calcular la densidad
-#ifndef WATER_SURFACE_OPACITY
-#define WATER_SURFACE_OPACITY 0.45
-#endif
-
-        // Densidad base + Slider
-        float density = 0.05 + (WATER_SURFACE_OPACITY * 0.5);
-
         // Distancia aproximada en bloques
         float fogDist = linear_d * far;
 
-        // Fórmula exponencial simple (más rápida que pow complejo)
-        float water_absorption = 1.0 - exp(-density * fogDist);
+        // Factor de niebla basado en la distancia del slider
+        // El valor del slider es la distancia en bloques donde la niebla es casi total.
+        float fogFactor = fogDist / (UNDERWATER_FOG_DISTANCE * 2.5); // multiplacdo por 2.5 para aumentar distancia.
+
+        // Fórmula exponencial, usando el factor. El '3.0' ajusta la caída (falloff).
+        float water_absorption = 1.0 - exp(-fogFactor * 3.0);
         water_absorption = clamp(water_absorption, 0.0, 1.0);
 
-        // Color del agua (Usa WATER_COLOR definido en color_utils/config)
-        // Mantenemos la mezcla con luz directa para preservar la iluminación del juego
-        vec3 waterFogColor = WATER_COLOR * direct_light_color * ((eye_bright_smooth.y * .8 + 48) * 0.004166666666666667);
-
         // Un pequeño tinte extra para inmersión
-        waterFogColor *= vec3(0.9, 0.95, 1.0);
+        vec3 waterFogColor = water_tint_underwater * vec3(0.9, 0.95, 1.0);
 
         block_color.rgb = mix(block_color.rgb, waterFogColor, water_absorption);
 #endif
+        block_color.rgb = mix(block_color.rgb, water_tint_underwater, WATER_OPACITY * 0.5); // Reducido a dentro del agua.
     } else if(isEyeInWater == 2) {
         // Lava (Sin cambios)
         block_color = mix(block_color, vec4(1.0, .1, 0.0, 1.0), clamp(sqrt(linear_d * far * 0.125), 0.0, 1.0));

@@ -69,6 +69,10 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 #define MOTION_BLUR_SAMPLES 3 // [3 4] Reduced samples for speed
 
 #define SUN_REFLECTION 1 // [0 1]
+#define DYNAMIC_SUN_REFLECTION 1 // [0 1]
+
+
+
 
 #define SHADOW_TYPE 1 // [0 1]
 #define SHADOW_BLUR 2.0
@@ -79,11 +83,10 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 // --- RENAMED & NEW SLIDERS ---
 #define WATER_OPACITY 0.45 // [0.0 0.05 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.85 0.9 0.95 1.0]
 
-#define UNDERWATER_REFRACTION 1 // [0 1]
-#define UNDERWATER_REFRACTION_STRENGTH 1.0 // [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2 1.5 2.0]
+#define REFRACTION_STRENGTH 1.0 // [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2 1.5 2.0]
 
 #define UNDERWATER_FOG 1        // [0 1]
-#define UNDERWATER_FOG_DENSITY_MULT 1.0 // [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.2 1.5 2.0 3.0]
+#define UNDERWATER_FOG_DISTANCE 20.0 // [5.0 10.0 15.0 20.0 25.0 30.0 40.0 50.0]
 
 #define COLOR_SCHEME 1
 
@@ -93,7 +96,8 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 
 #define V_CLOUDS 1 // [0 1 2]
 #define CLOUD_VOL_STYLE 0 // [0 1]
-#define CLOUD_REFLECTION
+#define CLOUD_REFLECTION 1 // [0 1]
+// [0: Desactivado | 1: Activado] Reflejo de nubes independiente y optimizado sobre el agua. Toggleable y de bajo costo.
 #define END_CLOUDS
 #define BLACK_ENTITY_FIX 0
 
