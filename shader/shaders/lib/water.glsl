@@ -3,6 +3,12 @@ Water reflection and refraction related functions.
 OPTIMIZED & VISUALLY ENHANCED FOR GTX 1650
 */
 
+// --- SIN UNIFORMS DUPLICADOS ---
+// El shader hereda gbufferModelViewInverse y cameraPosition del contexto global.
+
+// Definición de la función de nubes externa
+vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, vec3 base_pos, int samples, float umbral, vec3 cloud_color, vec3 dark_cloud_color);
+
 // Import defaults if config not loaded (safety)
 #ifndef WATER_COLOR_R
 #define WATER_COLOR_R 0.1
@@ -31,7 +37,6 @@ vec3 fast_raymarch(vec3 direction, vec3 hit_coord, inout float infinite, float d
     vec3 last_march_pos;
     int no_hidden_steps = 0;
     bool hiddens = false;
-
     for (int i = 0; i < RAYMARCH_STEPS; i++) {
         if (search_flag) {
             dir_increment *= 0.5;
@@ -43,7 +48,6 @@ vec3 fast_raymarch(vec3 direction, vec3 hit_coord, inout float infinite, float d
         }
         last_march_pos = march_pos;
         march_pos = camera_to_screen(current_march);
-
         // --- OPTIMIZATION: Early Exit ---
         if (march_pos.x < -0.1 || march_pos.x > 1.1 || march_pos.y < -0.1 || march_pos.y > 1.1) {
             out_flag = true;
@@ -75,20 +79,20 @@ vec3 fast_raymarch(vec3 direction, vec3 hit_coord, inout float infinite, float d
 // Reflejo solar/lunar optimizado con proyección dinámica barata
 float sun_reflection(vec3 reflected_dir) {
     #ifdef USE_PRENORMALIZED_DIRS
-        vec3 astro_dir = (worldTime > 12900.0) ? moonDir : sunDir;
+        vec3 astro_dir = (worldTime > 12900.0) ?
+            moonDir : sunDir;
         vec3 cam_dir   = cameraDir;
     #else
-        vec3 astro_dir = (worldTime > 12900.0) ? normalize(moonPosition) : normalize(sunPosition);
+        vec3 astro_dir = (worldTime > 12900.0) ?
+            normalize(moonPosition) : normalize(sunPosition);
         vec3 cam_dir = vec3(0.0, 0.0, -1.0); 
     #endif
 
     float alignment = max(dot(reflected_dir, astro_dir), 0.0);
-
     float highlight = pow(alignment, 70.0);
 
     // Atenuación por luz y lluvia
     float attenuation = clamp(lmcoord.y, 0.0, 1.0) * (1.0 - rainStrength);
-
     float distanceFactor = 1.0;
     #if DYNAMIC_SUN_REFLECTION == 1
         float camAngle = max(dot(cam_dir, astro_dir), 0.0);
@@ -109,40 +113,34 @@ vec3 normal_waves(vec3 pos) {
     float speed = frameTimeCounter * .025;
     vec2 wave_1 = texture2D(noisetex, ((pos.xy - pos.z * 0.2) * 0.05) + vec2(speed, speed)).rg;
     wave_1 = wave_1 - .5;
-
     // Multiplied by 2.0 to give more body to waves without extra texture lookups
-    vec2 partial_wave = wave_1 * 2.0; 
-
+    vec2 partial_wave = wave_1 * 2.0;
     vec3 final_wave = vec3(partial_wave, WATER_TURBULENCE - (rainStrength * 0.6 * WATER_TURBULENCE * visible_sky));
     return normalize(final_wave);
 }
 
 vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
     vec2 pos = gl_FragCoord.xy * vec2(pixel_size_x, pixel_size_y);
-#if REFRACTION == 1
+    #if REFRACTION == 1
     pos = pos + refraction.xy * (0.075 * REFRACTION_STRENGTH / (1.0 + length(fragpos) * 0.4));
-#endif
+    #endif
 
     float water_absortion;
     vec3 water_tint = vec3(WATER_COLOR_R, WATER_COLOR_G, WATER_COLOR_B);
-
     if (isEyeInWater == 0) {
         float water_distance = 2.0 * near * far / (far + near - (2.0 * gl_FragCoord.z - 1.0) * (far - near));
         float earth_distance = texture2D(depthtex1, pos.xy).r;
         earth_distance = 2.0 * near * far / (far + near - (2.0 * earth_distance - 1.0) * (far - near));
-
-#if defined DISTANT_HORIZONS
+        #if defined DISTANT_HORIZONS
         float earth_distance_dh = texture2D(dhDepthTex1, pos.xy).r;
         earth_distance_dh = 2.0 * dhNearPlane * dhFarPlane / (dhFarPlane + dhNearPlane - (2.0 * earth_distance_dh - 1.0) * (dhFarPlane - dhNearPlane));
         earth_distance = min(earth_distance, earth_distance_dh);
-#endif
+        #endif
 
         float raw_depth = earth_distance - water_distance;
-
         // --- VISUAL IMPROVEMENT: High Opacity / Less Transparent ---
         // Aumentamos drásticamente el multiplicador (de 3.0 a 10.0) para que se vuelva opaco muy rápido
         water_absortion = clamp(1.0 - exp(-raw_depth * WATER_ABSORPTION * 10.0), 0.0, 1.0);
-
         // --- DIRECT OPACITY BOOST (CONTROLLED BY SLIDER) ---
         // Forzamos una opacidad base controlada por el usuario.
         // Esto hace que el agua se sienta como un líquido denso y no como un cristal.
@@ -178,16 +176,12 @@ vec4 reflection_calc(vec3 fragpos, vec3 normal, vec3 reflected, inout float infi
 
     // --- VISUAL IMPROVEMENT: SMOOTHER REFLECTION FADEOUT ---
     // Create a much softer and more natural fade at screen edges
-    // to avoid the "weird" cutoff the user mentioned.
     vec2 fade_coord = (pos.xy - 0.5) * 2.0; // -1 to 1 range
     float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
-    
     // Also fade reflections that are too close to the camera (bottom of screen)
     border *= 1.0 - pow(pos.y, 8.0);
-    
     // Fade out if raymarch hit the sky or went off-screen
     border *= float(pos.x > 0.0 && pos.x < 1.0 && pos.y > 0.0 && pos.y < 1.0);
-    
     border = clamp(border, 0.0, 1.0);
 
     return vec4(texture2D(gaux1, pos.xy).rgb, border);
@@ -203,6 +197,7 @@ vec3 water_shader(
     float visible_sky,
     float dither,
     vec3 light_color) {
+    
     vec4 reflection = vec4(0.0);
     float infinite = 1.0;
 
@@ -210,7 +205,45 @@ vec3 water_shader(
     reflection = reflection_calc(fragpos, normal, reflected, infinite, dither);
 #endif
 
+    // --- REFLEJOS VOLUMÉTRICOS DE ALTA NITIDEZ ---
+    #if defined(V_CLOUDS) && V_CLOUDS > 0 && defined(CLOUD_REFLECTION) && CLOUD_REFLECTION == 1
+        // 1. Transformamos el vector de reflejo a World Space
+        vec3 world_reflected = mat3(gbufferModelViewInverse) * reflected;
+
+        if (world_reflected.y > 0.0) {
+            
+            // 2. Transformamos la posición a World Space
+            vec3 player_pos = (gbufferModelViewInverse * vec4(fragpos, 1.0)).xyz;
+            vec3 world_pos = player_pos + cameraPosition;
+
+            // --- MEJORA DE NITIDEZ: CONTRASTE Y SAMPLES ---
+            
+            // Aumentamos el contraste del color base para que la nube se "recorte" mejor
+            vec3 ref_cloud_col = light_color * 1.3 + vec3(0.15); 
+            // Oscurecemos un poco la parte densa para dar volumen
+            vec3 ref_cloud_dark = light_color * 0.4;
+            
+            float umbral_local = (smoothstep(1.0, 0.0, rainStrength) * 0.3) + 0.25;
+
+            // 3. Llamada a get_cloud con MÁS SAMPLES (9)
+            // Aumentar de 4 a 9 mejora drásticamente la definición de los bordes.
+            sky_reflect = get_cloud(
+                world_reflected, 
+                sky_reflect,     
+                visible_sky,     
+                dither,          
+                world_pos,       
+                9,               // <--- AUMENTADO A 9 PARA MÁS NITIDEZ
+                umbral_local,    
+                ref_cloud_col,   
+                ref_cloud_dark   
+            );
+        }
+    #endif
+    // -------------------------------------------------------
+
     reflection.rgb = mix(sky_reflect * visible_sky, reflection.rgb, reflection.a);
+    
 #if SUN_REFLECTION == 0
     reflection.rgb = mix(sky_reflect, reflection.rgb, reflection.a);
 #endif
@@ -219,10 +252,7 @@ vec3 water_shader(
     fresnel *= 0.8;
 #endif
 
-    // --- VISUAL IMPROVEMENT: Fresnel Boost ---
-    // Minimum 15% reflection to define the surface
-    float surface_visibility = max(fresnel, 0.15); 
-
+    float surface_visibility = max(fresnel, 0.15);
 #if SUN_REFLECTION == 1
 #ifndef NETHER
 #ifndef THE_END
@@ -259,16 +289,10 @@ vec4 cristal_reflection_calc(vec3 fragpos, vec3 normal, inout float infinite, fl
     }
 #endif
 
-    // --- VISUAL IMPROVEMENT: SMOOTHER REFLECTION FADEOUT (Consistent with water) ---
-    vec2 fade_coord = (pos.xy - 0.5) * 2.0; // -1 to 1 range
+    vec2 fade_coord = (pos.xy - 0.5) * 2.0;
     float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
-    
-    // Also fade reflections that are too close to the camera (bottom of screen)
     border *= 1.0 - pow(pos.y, 8.0);
-    
-    // Fade out if raymarch hit the sky or went off-screen
     border *= float(pos.x > 0.0 && pos.x < 1.0 && pos.y > 0.0 && pos.y < 1.0);
-    
     border = clamp(border, 0.0, 1.0);
 
     return vec4(texture2D(gaux1, pos.xy, 0.0).rgb, border);
