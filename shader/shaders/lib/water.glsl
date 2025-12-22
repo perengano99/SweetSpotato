@@ -93,14 +93,33 @@ float sun_reflection(vec3 reflected_dir) {
 #endif
 #endif
 
+
+
 // --- MODIFICADO: Respetar toggle WAVES ---
 vec3 normal_waves(vec3 pos) {
     #if WAVES == 1
-        float speed = frameTimeCounter * .025 * WATER_WAVE_SPEED;
-        vec2 wave_1 = texture2D(noisetex, ((pos.xy - pos.z * 0.2) * 0.05) + vec2(speed, speed)).rg;
-        wave_1 = wave_1 - .5;
+        float speed_val = frameTimeCounter * .025 * WATER_WAVE_SPEED;
+        vec2 coord = pos.xy - pos.z * 0.2; // Proyección original ajustada
 
-        vec2 partial_wave = wave_1 * 2.0 * WATER_NORMAL_STRENGTH;
+        // DISTORSIÓN DE DOMINIO (Muy sutil)
+        coord.x += coord.y * 0.95;
+
+        //INTERFERENCIA 4-VÍAS (Simula 8 direcciones)
+
+        vec2 c1 = (coord * 0.05) + vec2(speed_val, speed_val);
+        vec2 w1 = texture2D(noisetex, c1).rg - 0.5;
+
+        vec2 c2 = (coord * 0.05) + vec2(-speed_val * 0.95, speed_val * 1.05);
+        vec2 w2 = texture2D(noisetex, c2).rg - 0.5;
+
+        vec2 c3 = (coord * 0.05) + vec2(-speed_val * 1.05, -speed_val * 0.95);
+        vec2 w3 = texture2D(noisetex, c3).rg - 0.5;
+
+        vec2 c4 = (coord * 0.05) + vec2(speed_val * 0.9, -speed_val * 1.1);
+        vec2 w4 = texture2D(noisetex, c4).rg - 0.5;
+
+        vec2 combined_wave = (w1 + w2 + w3 + w4) * 0.6; // 0.6 mantiene la intensidad visual
+        vec2 partial_wave = combined_wave * 2.0 * WATER_NORMAL_STRENGTH;
 
         vec3 final_wave = vec3(partial_wave, WATER_TURBULENCE - (rainStrength * 0.6 * WATER_TURBULENCE * visible_sky));
         return normalize(final_wave);

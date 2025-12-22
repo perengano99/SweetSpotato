@@ -137,7 +137,7 @@ void main() {
 
         // Factor de niebla basado en la distancia del slider
         // El valor del slider es la distancia en bloques donde la niebla es casi total.
-        float fogFactor = fogDist / (UNDERWATER_FOG_DISTANCE * 2.5); // multiplacdo por 2.5 para aumentar distancia.
+        float fogFactor = fogDist / (UNDERWATER_FOG_DISTANCE * 2); // multiplacdo por 2 para aumentar distancia.
 
         // Fórmula exponencial, usando el factor. El '3.0' ajusta la caída (falloff).
         float water_absorption = 1.0 - exp(-fogFactor * 3.0);
@@ -148,7 +148,7 @@ void main() {
 
         block_color.rgb = mix(block_color.rgb, waterFogColor, water_absorption);
 #endif
-        block_color.rgb = mix(block_color.rgb, water_tint_underwater, WATER_OPACITY * 0.5); // Reducido a dentro del agua.
+        block_color.rgb = mix(block_color.rgb, water_tint_underwater, WATER_OPACITY * 0.75); // Reducido a dentro del agua.
     } else if(isEyeInWater == 2) {
         // Lava (Sin cambios)
         block_color = mix(block_color, vec4(1.0, .1, 0.0, 1.0), clamp(sqrt(linear_d * far * 0.125), 0.0, 1.0));
