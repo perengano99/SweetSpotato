@@ -52,6 +52,11 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 #define ACERCADE 0 // [0]
 #define WAVES 1 // [0 1]
 
+#define WATER_DISPLACEMENT 1 // [0 1]
+
+#define WATER_NORMAL_STRENGTH 1.0 // [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5 1.6 1.7 1.8 1.9 2.0] 
+#define WATER_WAVE_SPEED 1.0 // [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5 1.6 1.7 1.8 1.9 2.0 2.5 3.0]
+
 #define TINTED_WATER 1  // [0 1]
 #define REFRACTION 1  // [0 1]
 
@@ -111,7 +116,7 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 
 // #define VANILLA_WATER
 #define WATER_COLOR_SOURCE 0
-#define WATER_TURBULENCE 0.9
+#define WATER_TURBULENCE 0.9 // [0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5]
 #define FOG_ADJUST 2.0
 // #define DEBUG_MODE
 #define BLOCKLIGHT_TEMP 1

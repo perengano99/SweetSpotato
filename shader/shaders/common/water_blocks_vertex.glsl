@@ -23,6 +23,7 @@ uniform mat4 gbufferModelViewInverse;
 uniform vec3 cameraPosition;
 uniform float rainStrength;
 uniform mat4 gbufferProjectionInverse;
+uniform float frameTimeCounter;
 
 #ifdef DISTANT_HORIZONS
     uniform int dhRenderDistance;
