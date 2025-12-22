@@ -139,10 +139,10 @@ void main() {
     vec4 block_color;
     vec3 real_light;
 
-    #ifdef VANILLA_WATER
-        vec3 water_normal_base = vec3(0.0, 0.0, 1.0);
-    #else
+    #if defined(WAVES) && !defined(VANILLA_WATER)
         vec3 water_normal_base = normal_waves(worldposition.xzy);
+    #else
+        vec3 water_normal_base = vec3(0.0, 0.0, 1.0);
     #endif
     
     vec3 surface_normal;

@@ -1,10 +1,7 @@
 /* MakeUp - water.glsl
 Water reflection and refraction related functions.
-OPTIMIZED & VISUALLY ENHANCED FOR GTX 1650
+ULTRA OPTIMIZED: Hybrid Approach (Cheap Far + Low Cost Contact Near)
 */
-
-// --- SIN UNIFORMS DUPLICADOS ---
-// El shader hereda gbufferModelViewInverse y cameraPosition del contexto global.
 
 // Definición de la función de nubes externa
 vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, vec3 base_pos, int samples, float umbral, vec3 cloud_color, vec3 dark_cloud_color);
@@ -20,84 +17,93 @@ vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, v
 #define WATER_OPACITY 0.45
 #endif
 
-vec3 fast_raymarch(vec3 direction, vec3 hit_coord, inout float infinite, float dither) {
-    vec3 dir_increment;
-    vec3 current_march = hit_coord;
-    vec3 old_current_march;
-    float screen_depth;
-    float depth_diff = 1.0;
-    vec3 march_pos = camera_to_screen(hit_coord);
-    float prev_screen_depth = march_pos.z;
-    float hit_z = march_pos.z;
-    bool search_flag = false;
-    bool hidden_flag = false;
-    bool first_hidden = true;
-    bool out_flag = false;
-    bool to_far = false;
-    vec3 last_march_pos;
-    int no_hidden_steps = 0;
-    bool hiddens = false;
-    for (int i = 0; i < RAYMARCH_STEPS; i++) {
-        if (search_flag) {
-            dir_increment *= 0.5;
-            current_march += dir_increment * sign(depth_diff);
-        } else {
-            old_current_march = current_march;
-            current_march = hit_coord + ((direction * exp2(i + dither)) - direction);
-            dir_increment = current_march - old_current_march;
-        }
-        last_march_pos = march_pos;
-        march_pos = camera_to_screen(current_march);
-        // --- OPTIMIZATION: Early Exit ---
-        if (march_pos.x < -0.1 || march_pos.x > 1.1 || march_pos.y < -0.1 || march_pos.y > 1.1) {
-            out_flag = true;
-            break;
-        }
-        if (march_pos.z > 0.9999) to_far = true;
+// --- FUNCIÓN DEDICADA: Reflejos Cercanos ULTRA OPTIMIZADOS ---
+// Usa menos pasos y un refinamiento barato para máximo rendimiento.
+vec4 near_reflection_calc(vec3 fragpos, vec3 reflected_dir, float dither) {
+    // 1. Configuración de BAJO COSTO
+    // Reducimos pasos para no saturar la GPU. 
+    // Usamos dither para compensar la falta de pasos (el ruido es mejor que el lag).
+    const int steps = 10;       // Solo 10 lecturas de textura (muy ligero)
+    float max_dist = 5.0;       // Solo reflejamos los 5 metros inmediatos
+    float step_len = max_dist / float(steps);
 
-        screen_depth = texture2D(depthtex1, march_pos.xy).x;
-        depth_diff = screen_depth - march_pos.z;
+    vec3 ray_pos = fragpos;
+    vec3 ray_dir = reflected_dir; 
 
-        if (depth_diff < 0.0 && abs(screen_depth - prev_screen_depth) > abs(march_pos.z - last_march_pos.z)) {
-            hidden_flag = true;
-            hiddens = true;
-            if (first_hidden) first_hidden = false;
-        } else if (depth_diff > 0.0) {
-            hidden_flag = false;
-            if (!hiddens) no_hidden_steps++;
+    // Inicio aleatorio (Jitter) para ocultar bandas
+    vec3 current_pos = ray_pos + ray_dir * (step_len * dither);
+    
+    // Variables de estado
+    vec3 screen_pos;
+    bool hit = false;
+    
+    // 2. Búsqueda Lineal Rápida
+    for(int i = 0; i < steps; i++) {
+        current_pos += ray_dir * step_len;
+        screen_pos = camera_to_screen(current_pos);
+
+        // Salida rápida si sale de pantalla
+        if(screen_pos.x < 0.0 || screen_pos.x > 1.0 || screen_pos.y < 0.0 || screen_pos.y > 1.0 || screen_pos.z > 1.0) {
+            return vec4(0.0); // Abortamos inmediatamente
         }
-        if (search_flag == false && depth_diff < 0.0 && hidden_flag == false) search_flag = true;
-        prev_screen_depth = screen_depth;
+
+        // Lectura de profundidad (lo más costoso, por eso limitamos a 10)
+        float stored_depth = texture2D(depthtex0, screen_pos.xy).r;
+
+        float diff = screen_pos.z - stored_depth;
+        
+        // Tolerancia generosa (0.05) para asegurar que detectamos bloques/jugador
+        // aunque los pasos sean grandes.
+        if(diff > 0.0 && diff < 0.05) { 
+            hit = true;
+            break; 
+        }
     }
-    infinite = float(screen_depth > 0.9999);
-    if (out_flag || to_far && (no_hidden_steps < 3 || screen_depth > hit_z)) return march_pos;
-    return march_pos;
+
+    // 3. Resolución de Impacto (Sin Bucle Binario)
+    // En lugar de gastar rendimiento refinando con un bucle, 
+    // hacemos una interpolación simple. Es "bueno, bonito y barato".
+    if(hit) {
+        // Retrocedemos medio paso para aproximar el contacto
+        // Esto reduce el error visual sin gastar ni un ciclo extra de GPU.
+        vec3 final_screen_pos = screen_pos - (camera_to_screen(ray_dir * step_len * 0.5));
+        
+        // Comprobación final de seguridad
+        if (final_screen_pos.x < 0.0 || final_screen_pos.x > 1.0 || final_screen_pos.y < 0.0 || final_screen_pos.y > 1.0) return vec4(0.0);
+
+        // Fading de bordes (Vignette)
+        vec2 edge = abs(final_screen_pos.xy * 2.0 - 1.0);
+        float screen_fade = 1.0 - pow(max(edge.x, edge.y), 6.0);
+        
+        // Fading por distancia (para mezclar suavemente con el reflejo lejano)
+        float dist = length(current_pos - fragpos);
+        float dist_fade = 1.0 - clamp(dist / max_dist, 0.0, 1.0);
+
+        return vec4(texture2D(gaux1, final_screen_pos.xy).rgb, screen_fade * dist_fade);
+    }
+
+    return vec4(0.0);
 }
 
 #if SUN_REFLECTION == 1
 #if !defined NETHER && !defined THE_END
-// Reflejo solar/lunar optimizado con proyección dinámica barata
+// Reflejo solar/lunar optimizado
 float sun_reflection(vec3 reflected_dir) {
     #ifdef USE_PRENORMALIZED_DIRS
-        vec3 astro_dir = (worldTime > 12900.0) ?
-            moonDir : sunDir;
+        vec3 astro_dir = (worldTime > 12900.0) ? moonDir : sunDir;
         vec3 cam_dir   = cameraDir;
     #else
-        vec3 astro_dir = (worldTime > 12900.0) ?
-            normalize(moonPosition) : normalize(sunPosition);
+        vec3 astro_dir = (worldTime > 12900.0) ? normalize(moonPosition) : normalize(sunPosition);
         vec3 cam_dir = vec3(0.0, 0.0, -1.0); 
     #endif
 
     float alignment = max(dot(reflected_dir, astro_dir), 0.0);
     float highlight = pow(alignment, 70.0);
 
-    // Atenuación por luz y lluvia
     float attenuation = clamp(lmcoord.y, 0.0, 1.0) * (1.0 - rainStrength);
     float distanceFactor = 1.0;
     #if DYNAMIC_SUN_REFLECTION == 1
         float camAngle = max(dot(cam_dir, astro_dir), 0.0);
-        // Ajuste perceptual: más lejos cuando miras hacia el astro
-        // Tuning mínimo para GTX 1650; solo mix + dot
         distanceFactor = mix(0.6, 2.2, camAngle);
     #endif
 
@@ -106,14 +112,10 @@ float sun_reflection(vec3 reflected_dir) {
 #endif
 #endif
 
-
-
 vec3 normal_waves(vec3 pos) {
-    // --- OPTIMIZATION: Single Noise Lookup ---
     float speed = frameTimeCounter * .025;
     vec2 wave_1 = texture2D(noisetex, ((pos.xy - pos.z * 0.2) * 0.05) + vec2(speed, speed)).rg;
     wave_1 = wave_1 - .5;
-    // Multiplied by 2.0 to give more body to waves without extra texture lookups
     vec2 partial_wave = wave_1 * 2.0;
     vec3 final_wave = vec3(partial_wave, WATER_TURBULENCE - (rainStrength * 0.6 * WATER_TURBULENCE * visible_sky));
     return normalize(final_wave);
@@ -138,12 +140,7 @@ vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
         #endif
 
         float raw_depth = earth_distance - water_distance;
-        // --- VISUAL IMPROVEMENT: High Opacity / Less Transparent ---
-        // Aumentamos drásticamente el multiplicador (de 3.0 a 10.0) para que se vuelva opaco muy rápido
         water_absortion = clamp(1.0 - exp(-raw_depth * WATER_ABSORPTION * 10.0), 0.0, 1.0);
-        // --- DIRECT OPACITY BOOST (CONTROLLED BY SLIDER) ---
-        // Forzamos una opacidad base controlada por el usuario.
-        // Esto hace que el agua se sienta como un líquido denso y no como un cristal.
         water_absortion = max(water_absortion, WATER_OPACITY);
     } else {
         water_absortion = 0.0;
@@ -163,30 +160,7 @@ vec3 get_normals(vec3 bump, vec3 fragpos) {
     return normalize(bump * tbn_matrix);
 }
 
-vec4 reflection_calc(vec3 fragpos, vec3 normal, vec3 reflected, inout float infinite, float dither) {
-#if SSR_TYPE == 0  // Flipped image
-#if defined DISTANT_HORIZONS
-    vec3 pos = camera_to_screen(fragpos + reflected * 768.0);
-#else
-    vec3 pos = camera_to_screen(fragpos + reflected * 76.0);
-#endif
-#else  // Raymarch
-    vec3 pos = fast_raymarch(reflected, fragpos, infinite, dither);
-#endif
-
-    // --- VISUAL IMPROVEMENT: SMOOTHER REFLECTION FADEOUT ---
-    // Create a much softer and more natural fade at screen edges
-    vec2 fade_coord = (pos.xy - 0.5) * 2.0; // -1 to 1 range
-    float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
-    // Also fade reflections that are too close to the camera (bottom of screen)
-    border *= 1.0 - pow(pos.y, 8.0);
-    // Fade out if raymarch hit the sky or went off-screen
-    border *= float(pos.x > 0.0 && pos.x < 1.0 && pos.y > 0.0 && pos.y < 1.0);
-    border = clamp(border, 0.0, 1.0);
-
-    return vec4(texture2D(gaux1, pos.xy).rgb, border);
-}
-
+// --- REFLEJOS HÍBRIDOS ---
 vec3 water_shader(
     vec3 fragpos,
     vec3 normal,
@@ -198,128 +172,101 @@ vec3 water_shader(
     float dither,
     vec3 light_color) {
     
-    vec4 reflection = vec4(0.0);
-    float infinite = 1.0;
+    vec3 final_reflection = vec3(0.0);
+    float reflection_alpha = 0.0;
 
-#if REFLECTION == 1
-    reflection = reflection_calc(fragpos, normal, reflected, infinite, dither);
-#endif
+    // 1. REFLEJO LEJANO: FLIPPED IMAGE (Barato)
+    #if defined DISTANT_HORIZONS
+        vec3 distant_pos = camera_to_screen(fragpos + reflected * 768.0);
+    #else
+        vec3 distant_pos = camera_to_screen(fragpos + reflected * 76.0);
+    #endif
+    
+    // Flipped Image Logic
+    if (distant_pos.x > 0.0 && distant_pos.x < 1.0 && distant_pos.y > 0.0 && distant_pos.y < 1.0) {
+        final_reflection = texture2D(gaux1, distant_pos.xy).rgb;
+        vec2 fade_coord = (distant_pos.xy - 0.5) * 2.0;
+        float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
+        reflection_alpha = border;
+    }
 
-    // --- REFLEJOS VOLUMÉTRICOS DE ALTA NITIDEZ ---
+    // --- REFLEJOS VOLUMÉTRICOS (Fondo) ---
     #if defined(V_CLOUDS) && V_CLOUDS > 0 && defined(CLOUD_REFLECTION) && CLOUD_REFLECTION == 1
-        // 1. Transformamos el vector de reflejo a World Space
         vec3 world_reflected = mat3(gbufferModelViewInverse) * reflected;
-
         if (world_reflected.y > 0.0) {
-            
-            // 2. Transformamos la posición a World Space
-            vec3 player_pos = (gbufferModelViewInverse * vec4(fragpos, 1.0)).xyz;
-            vec3 world_pos = player_pos + cameraPosition;
-
-            // --- MEJORA DE NITIDEZ: CONTRASTE Y SAMPLES ---
-            
-            // Aumentamos el contraste del color base para que la nube se "recorte" mejor
-            vec3 ref_cloud_col = light_color * 1.3 + vec3(0.15); 
-            // Oscurecemos un poco la parte densa para dar volumen
-            vec3 ref_cloud_dark = light_color * 0.4;
-            
-            float umbral_local = (smoothstep(1.0, 0.0, rainStrength) * 0.3) + 0.25;
-
-            // 3. Llamada a get_cloud con MÁS SAMPLES (9)
-            // Aumentar de 4 a 9 mejora drásticamente la definición de los bordes.
-            sky_reflect = get_cloud(
-                world_reflected, 
-                sky_reflect,     
-                visible_sky,     
-                dither,          
-                world_pos,       
-                9,               // <--- AUMENTADO A 9 PARA MÁS NITIDEZ
-                umbral_local,    
-                ref_cloud_col,   
-                ref_cloud_dark   
-            );
+             vec3 player_pos = (gbufferModelViewInverse * vec4(fragpos, 1.0)).xyz;
+             vec3 world_pos = player_pos + cameraPosition;
+             vec3 ref_cloud_col = light_color * 1.3 + vec3(0.15);
+             vec3 ref_cloud_dark = light_color * 0.4;
+             float umbral_local = (smoothstep(1.0, 0.0, rainStrength) * 0.3) + 0.25;
+             
+             // Muestras bajas (4) porque es fondo
+             vec3 cloud_ref = get_cloud(world_reflected, sky_reflect, visible_sky, dither, world_pos, 4, umbral_local, ref_cloud_col, ref_cloud_dark);
+             
+             // Mezclar donde el flipped falla
+             final_reflection = mix(cloud_ref * visible_sky, final_reflection, reflection_alpha);
+             reflection_alpha = max(reflection_alpha, visible_sky); 
         }
     #endif
-    // -------------------------------------------------------
 
-    reflection.rgb = mix(sky_reflect * visible_sky, reflection.rgb, reflection.a);
+    // 2. REFLEJO CERCANO: RAYMARCHING DE CONTACTO (Calidad Local)
+    vec4 near_ref = near_reflection_calc(fragpos, reflected, dither);
     
-#if SUN_REFLECTION == 0
-    reflection.rgb = mix(sky_reflect, reflection.rgb, reflection.a);
-#endif
+    // Mezcla final
+    final_reflection = mix(final_reflection, near_ref.rgb, near_ref.a);
 
-#ifdef VANILLA_WATER
-    fresnel *= 0.8;
-#endif
+    #ifdef VANILLA_WATER
+        fresnel *= 0.8;
+    #endif
 
     float surface_visibility = max(fresnel, 0.15);
-#if SUN_REFLECTION == 1
-#ifndef NETHER
-#ifndef THE_END
-    return mix(color, reflection.rgb, surface_visibility * REFLEX_INDEX) +
-    vec3(sun_reflection(reflected)) * light_color * visible_sky;
-#else
-    return mix(color, reflection.rgb, surface_visibility * REFLEX_INDEX);
-#endif
-#else
-    return mix(color, reflection.rgb, surface_visibility * REFLEX_INDEX);
-#endif
-#else
-    return mix(color, reflection.rgb, surface_visibility * REFLEX_INDEX);
-#endif
+    
+    #if SUN_REFLECTION == 1 && !defined(NETHER) && !defined(THE_END)
+        return mix(color, final_reflection, surface_visibility * REFLEX_INDEX) +
+               vec3(sun_reflection(reflected)) * light_color * visible_sky;
+    #else
+        return mix(color, final_reflection, surface_visibility * REFLEX_INDEX);
+    #endif
 }
 
+// Shader para cristal
 vec4 cristal_reflection_calc(vec3 fragpos, vec3 normal, inout float infinite, float dither) {
-#if SSR_TYPE == 0
-#if defined DISTANT_HORIZONS
-    vec3 reflected_vector = reflect(normalize(fragpos), normal) * 768.0;
-#else
-    vec3 reflected_vector = reflect(normalize(fragpos), normal) * 76.0;
-#endif
-    vec3 pos = camera_to_screen(fragpos + reflected_vector);
-#else
     vec3 reflected_vector = reflect(normalize(fragpos), normal);
-    vec3 pos = fast_raymarch(reflected_vector, fragpos, infinite, dither);
-    if (pos.x > 99.0) {
-#if defined DISTANT_HORIZONS
-        pos = camera_to_screen(fragpos + reflected_vector * 768.0);
-#else
-        pos = camera_to_screen(fragpos + reflected_vector * 76.0);
-#endif
-    }
-#endif
-
+    
+    // Flipped Image para cristal
+    vec3 pos = camera_to_screen(fragpos + reflected_vector * 76.0);
     vec2 fade_coord = (pos.xy - 0.5) * 2.0;
     float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
-    border *= 1.0 - pow(pos.y, 8.0);
-    border *= float(pos.x > 0.0 && pos.x < 1.0 && pos.y > 0.0 && pos.y < 1.0);
     border = clamp(border, 0.0, 1.0);
+    
+    vec3 final_col = texture2D(gaux1, pos.xy).rgb;
 
-    return vec4(texture2D(gaux1, pos.xy, 0.0).rgb, border);
+    // Reflejo cercano para cristal
+    vec4 near_ref = near_reflection_calc(fragpos, reflected_vector, dither);
+    final_col = mix(final_col, near_ref.rgb, near_ref.a);
+    border = max(border, near_ref.a);
+
+    return vec4(final_col, border);
 }
 
 vec4 cristal_shader(vec3 fragpos, vec3 normal, vec4 color, vec3 sky_reflection, float fresnel, float visible_sky, float dither, vec3 light_color) {
     vec4 reflection = vec4(0.0);
     float infinite = 0.0;
-#if REFLECTION == 1
-    reflection = cristal_reflection_calc(fragpos, normal, infinite, dither);
-#endif
+    
+    #if REFLECTION == 1
+        reflection = cristal_reflection_calc(fragpos, normal, infinite, dither);
+    #endif
+    
     sky_reflection = mix(color.rgb, sky_reflection, visible_sky * visible_sky);
     reflection.rgb = mix(sky_reflection, reflection.rgb, reflection.a);
+    
     color.rgb = mix(color.rgb, sky_reflection, fresnel);
     color.rgb = mix(color.rgb, reflection.rgb, fresnel);
     color.a = mix(color.a, 1.0, fresnel * .9);
-#if SUN_REFLECTION == 1
-#ifndef NETHER
-#ifndef THE_END
-    return color + vec4(mix(vec3(sun_reflection(reflect(normalize(fragpos), normal)) * light_color * visible_sky), vec3(0.0), reflection.a), 0.0);
-#else
-    return color;
-#endif
-#else
-    return color;
-#endif
-#else
-    return color;
-#endif
+    
+    #if SUN_REFLECTION == 1 && !defined(NETHER) && !defined(THE_END)
+         return color + vec4(mix(vec3(sun_reflection(reflect(normalize(fragpos), normal)) * light_color * visible_sky), vec3(0.0), reflection.a), 0.0);
+    #else
+         return color;
+    #endif
 }

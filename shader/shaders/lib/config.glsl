@@ -50,7 +50,7 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 #define FOG_ACTIVE // Toggle fog
 #define NETHER_FOG_DISTANCE 1 // [0 1]
 #define ACERCADE 0 // [0]
-#define WAVING 1 // [0 1]
+#define WAVES 1 // [0 1]
 
 #define TINTED_WATER 1  // [0 1]
 #define REFRACTION 1  // [0 1]
