@@ -1,15 +1,14 @@
 /* MakeUp - water.glsl
-Water reflection and refraction related functions.
-ULTRA OPTIMIZED: Hybrid Approach + Waves Toggle
+Water reflection, refraction and foam functions.
+OPTIMIZED: 4-Way Waves + Stationary Boiling Foam (No Sliding)
 */
 
-// --- SIN UNIFORMS DUPLICADOS ---
-// El shader hereda gbufferModelViewInverse, cameraPosition y depthtex0 del contexto global.
+// --- NOTA: frameTimeCounter ya está definido globalmente ---
 
-// Definición de la función de nubes externa
+// Definición de función externa
 vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, vec3 base_pos, int samples, float umbral, vec3 cloud_color, vec3 dark_cloud_color);
 
-// Import defaults if config not loaded (safety)
+// Defaults
 #ifndef WATER_COLOR_R
 #define WATER_COLOR_R 0.1
 #define WATER_COLOR_G 0.4
@@ -20,55 +19,50 @@ vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, v
 #define WATER_OPACITY 0.45
 #endif
 
-// --- FUNCIÓN DEDICADA: Reflejos Cercanos ULTRA OPTIMIZADOS ---
+#ifndef WATER_NORMAL_STRENGTH
+#define WATER_NORMAL_STRENGTH 1.0
+#endif
+
+#ifndef WATER_WAVE_SPEED
+#define WATER_WAVE_SPEED 1.0
+#endif
+
+#ifndef WATER_FOAM
+#define WATER_FOAM 1
+#endif
+
+// --- FUNCIONES AUXILIARES (Reflejos) ---
 vec4 near_reflection_calc(vec3 fragpos, vec3 reflected_dir, float dither) {
     const int steps = 10;       
     float max_dist = 5.0;       
     float step_len = max_dist / float(steps);
-
     vec3 ray_pos = fragpos;
     vec3 ray_dir = reflected_dir; 
-
     vec3 current_pos = ray_pos + ray_dir * (step_len * dither);
     vec3 screen_pos;
     bool hit = false;
-    
     for(int i = 0; i < steps; i++) {
         current_pos += ray_dir * step_len;
         screen_pos = camera_to_screen(current_pos);
-
-        if(screen_pos.x < 0.0 || screen_pos.x > 1.0 || screen_pos.y < 0.0 || screen_pos.y > 1.0 || screen_pos.z > 1.0) {
-            return vec4(0.0); 
-        }
-
+        if(screen_pos.x < 0.0 || screen_pos.x > 1.0 || screen_pos.y < 0.0 || screen_pos.y > 1.0 || screen_pos.z > 1.0) return vec4(0.0); 
         float stored_depth = texture2D(depthtex0, screen_pos.xy).r;
         float diff = screen_pos.z - stored_depth;
-        
-        if(diff > 0.0 && diff < 0.05) { 
-            hit = true;
-            break; 
-        }
+        if(diff > 0.0 && diff < 0.05) { hit = true; break; }
     }
-
     if(hit) {
         vec3 final_screen_pos = screen_pos - (camera_to_screen(ray_dir * step_len * 0.5));
         if (final_screen_pos.x < 0.0 || final_screen_pos.x > 1.0 || final_screen_pos.y < 0.0 || final_screen_pos.y > 1.0) return vec4(0.0);
-
         vec2 edge = abs(final_screen_pos.xy * 2.0 - 1.0);
         float screen_fade = 1.0 - pow(max(edge.x, edge.y), 6.0);
-        
         float dist = length(current_pos - fragpos);
         float dist_fade = 1.0 - clamp(dist / max_dist, 0.0, 1.0);
-
         return vec4(texture2D(gaux1, final_screen_pos.xy).rgb, screen_fade * dist_fade);
     }
-
     return vec4(0.0);
 }
 
 #if SUN_REFLECTION == 1
 #if !defined NETHER && !defined THE_END
-// Reflejo solar/lunar optimizado
 float sun_reflection(vec3 reflected_dir) {
     #ifdef USE_PRENORMALIZED_DIRS
         vec3 astro_dir = (worldTime > 12900.0) ? moonDir : sunDir;
@@ -77,50 +71,35 @@ float sun_reflection(vec3 reflected_dir) {
         vec3 astro_dir = (worldTime > 12900.0) ? normalize(moonPosition) : normalize(sunPosition);
         vec3 cam_dir = vec3(0.0, 0.0, -1.0); 
     #endif
-
     float alignment = max(dot(reflected_dir, astro_dir), 0.0);
     float highlight = pow(alignment, 70.0);
-
     float attenuation = clamp(lmcoord.y, 0.0, 1.0) * (1.0 - rainStrength);
     float distanceFactor = 1.0;
     #if DYNAMIC_SUN_REFLECTION == 1
         float camAngle = max(dot(cam_dir, astro_dir), 0.0);
         distanceFactor = mix(0.6, 2.2, camAngle);
     #endif
-
     return highlight * attenuation * distanceFactor * 2.5;
 }
 #endif
 #endif
 
-
-
-// --- MODIFICADO: Respetar toggle WAVES ---
+// --- OLAS 4-VÍAS ---
 vec3 normal_waves(vec3 pos) {
     #if WAVES == 1
-        float speed_val = frameTimeCounter * .025 * WATER_WAVE_SPEED;
-        vec2 coord = pos.xy - pos.z * 0.2; // Proyección original ajustada
-
-        // DISTORSIÓN DE DOMINIO (Muy sutil)
-        coord.x += coord.y * 0.95;
-
-        //INTERFERENCIA 4-VÍAS (Simula 8 direcciones)
-
+        float speed_val = frameTimeCounter * 0.025 * WATER_WAVE_SPEED;
+        vec2 coord = pos.xy - pos.z * 0.2; 
+        coord.x += coord.y * 0.1;
         vec2 c1 = (coord * 0.05) + vec2(speed_val, speed_val);
         vec2 w1 = texture2D(noisetex, c1).rg - 0.5;
-
         vec2 c2 = (coord * 0.05) + vec2(-speed_val * 0.95, speed_val * 1.05);
         vec2 w2 = texture2D(noisetex, c2).rg - 0.5;
-
         vec2 c3 = (coord * 0.05) + vec2(-speed_val * 1.05, -speed_val * 0.95);
         vec2 w3 = texture2D(noisetex, c3).rg - 0.5;
-
         vec2 c4 = (coord * 0.05) + vec2(speed_val * 0.9, -speed_val * 1.1);
         vec2 w4 = texture2D(noisetex, c4).rg - 0.5;
-
-        vec2 combined_wave = (w1 + w2 + w3 + w4) * 0.6; // 0.6 mantiene la intensidad visual
+        vec2 combined_wave = (w1 + w2 + w3 + w4) * 0.6; 
         vec2 partial_wave = combined_wave * 2.0 * WATER_NORMAL_STRENGTH;
-
         vec3 final_wave = vec3(partial_wave, WATER_TURBULENCE - (rainStrength * 0.6 * WATER_TURBULENCE * visible_sky));
         return normalize(final_wave);
     #else
@@ -128,6 +107,7 @@ vec3 normal_waves(vec3 pos) {
     #endif
 }
 
+// --- REFRACCIÓN + ESPUMA (SOLUCIÓN: NO BARRIDO + NO TREPAR) ---
 vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
     vec2 pos = gl_FragCoord.xy * vec2(pixel_size_x, pixel_size_y);
     #if REFRACTION == 1
@@ -135,7 +115,10 @@ vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
     #endif
 
     float water_absortion;
+    float foam_factor = 0.0;
+    vec3 foam_color_final = vec3(0.95);
     vec3 water_tint = vec3(WATER_COLOR_R, WATER_COLOR_G, WATER_COLOR_B);
+    
     if (isEyeInWater == 0) {
         float water_distance = 2.0 * near * far / (far + near - (2.0 * gl_FragCoord.z - 1.0) * (far - near));
         float earth_distance = texture2D(depthtex1, pos.xy).r;
@@ -149,12 +132,72 @@ vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
         float raw_depth = earth_distance - water_distance;
         water_absortion = clamp(1.0 - exp(-raw_depth * WATER_ABSORPTION * 10.0), 0.0, 1.0);
         water_absortion = max(water_absortion, WATER_OPACITY);
+
+        // --- ESPUMA NATURAL MEJORADA ---
+        #if WATER_FOAM == 1
+            vec3 worldPos = fragpos + cameraPosition;
+            
+            // 1. SOLUCIÓN AL BARRIDO: INTERFERENCIA DE RUIDO
+            // En lugar de mover una textura en una dirección, movemos dos en direcciones opuestas.
+            // Esto crea un patrón que "burbujea" y cambia sin desplazarse lateralmente como una cinta.
+            
+            float speed = frameTimeCounter * 0.01; // Velocidad muy lenta y relajante
+            
+            // Capa A: Se mueve lento hacia +X +Z
+            float bubbles_a = texture2D(noisetex, (worldPos.xz * 0.15) + vec2(speed, speed)).r;
+            // Capa B: Se mueve lento hacia -X -Z
+            float bubbles_b = texture2D(noisetex, (worldPos.xz * 0.15) - vec2(speed, speed)).r;
+            
+            // Mezclamos (Promedio). El resultado es un ruido orgánico que evoluciona in-situ.
+            float bubbles = (bubbles_a + bubbles_b) * 0.5;
+
+            // 2. PARCHES DE COBERTURA (Zonas grandes sin espuma)
+            float patch_noise = texture2D(noisetex, (worldPos.xz * 0.005) + vec2(speed * 0.2)).r;
+            float tide_cycle = sin(frameTimeCounter * 0.15); // Marea lenta
+            
+            // coverage define dónde PUEDE haber espuma.
+            float coverage = smoothstep(0.4, 0.7, patch_noise + (tide_cycle * 0.15));
+
+            // 3. SOLUCIÓN A "TREPAR PAREDES"
+            // Reducimos el umbral de profundidad drásticamente (de 1.2 a 0.5).
+            // Esto obliga a la espuma a quedarse pegada a la orilla.
+            // Para compensar visualmente, hacemos que el ruido 'bubbles' extienda la forma irregularmente.
+            
+            // Base 0.3m + Variación de burbujas hasta 0.5m.
+            // Esto es mucho más restringido que antes, evitando subir bloques verticales.
+            float threshold = (0.3 + bubbles * 0.5) * coverage;
+            
+            // 4. MÁSCARA SUAVE (Gradiente Natural)
+            float foam_mask = 1.0 - smoothstep(0.0, threshold, raw_depth);
+            
+            // Un poco de textura en la máscara para romper la línea perfecta
+            foam_mask *= (0.7 + bubbles * 0.3);
+
+            // 5. TEXTURIZADO Y VOLUMEN (Sombra/Luz)
+            vec3 foam_shadow = vec3(0.70, 0.75, 0.80);
+            vec3 foam_highlight = vec3(1.0, 1.0, 1.0);
+            
+            // Usamos el ruido bubbles para dar relieve
+            float texture_detail = smoothstep(0.3, 0.7, bubbles);
+            foam_color_final = mix(foam_shadow, foam_highlight, texture_detail);
+
+            // Opacidad final controlada (Translúcida)
+            foam_factor = foam_mask * 0.6;
+        #endif
+        // -------------------------------------
+
     } else {
         water_absortion = 0.0;
     }
 
     vec3 background = texture2D(gaux1, pos.xy).rgb;
-    return mix(background, water_tint, water_absortion);
+    vec3 final_color = mix(background, water_tint, water_absortion);
+
+    #if WATER_FOAM == 1
+        final_color = mix(final_color, foam_color_final, foam_factor);
+    #endif
+
+    return final_color;
 }
 
 vec3 get_normals(vec3 bump, vec3 fragpos) {
@@ -167,7 +210,6 @@ vec3 get_normals(vec3 bump, vec3 fragpos) {
     return normalize(bump * tbn_matrix);
 }
 
-// --- REFLEJOS HÍBRIDOS ---
 vec3 water_shader(
     vec3 fragpos,
     vec3 normal,
@@ -182,7 +224,6 @@ vec3 water_shader(
     vec3 final_reflection = vec3(0.0);
     float reflection_alpha = 0.0;
 
-    // 1. REFLEJO LEJANO: FLIPPED IMAGE (Barato)
     #if defined DISTANT_HORIZONS
         vec3 distant_pos = camera_to_screen(fragpos + reflected * 768.0);
     #else
@@ -196,7 +237,6 @@ vec3 water_shader(
         reflection_alpha = border;
     }
 
-    // --- REFLEJOS VOLUMÉTRICOS (Fondo) ---
     #if defined(V_CLOUDS) && V_CLOUDS > 0 && defined(CLOUD_REFLECTION) && CLOUD_REFLECTION == 1
         vec3 world_reflected = mat3(gbufferModelViewInverse) * reflected;
         if (world_reflected.y > 0.0) {
@@ -205,14 +245,12 @@ vec3 water_shader(
              vec3 ref_cloud_col = light_color * 1.3 + vec3(0.15);
              vec3 ref_cloud_dark = light_color * 0.4;
              float umbral_local = (smoothstep(1.0, 0.0, rainStrength) * 0.3) + 0.25;
-             // Muestras bajas (4) porque es fondo
              vec3 cloud_ref = get_cloud(world_reflected, sky_reflect, visible_sky, dither, world_pos, 4, umbral_local, ref_cloud_col, ref_cloud_dark);
              final_reflection = mix(cloud_ref * visible_sky, final_reflection, reflection_alpha);
              reflection_alpha = max(reflection_alpha, visible_sky); 
         }
     #endif
 
-    // 2. REFLEJO CERCANO: RAYMARCHING DE CONTACTO (Calidad Local)
     vec4 near_ref = near_reflection_calc(fragpos, reflected, dither);
     final_reflection = mix(final_reflection, near_ref.rgb, near_ref.a);
 
@@ -230,38 +268,30 @@ vec3 water_shader(
     #endif
 }
 
-// Shader para cristal
 vec4 cristal_reflection_calc(vec3 fragpos, vec3 normal, inout float infinite, float dither) {
     vec3 reflected_vector = reflect(normalize(fragpos), normal);
-    
     vec3 pos = camera_to_screen(fragpos + reflected_vector * 76.0);
     vec2 fade_coord = (pos.xy - 0.5) * 2.0;
     float border = 1.0 - pow(max(abs(fade_coord.x), abs(fade_coord.y)), 4.0);
     border = clamp(border, 0.0, 1.0);
-    
     vec3 final_col = texture2D(gaux1, pos.xy).rgb;
-
     vec4 near_ref = near_reflection_calc(fragpos, reflected_vector, dither);
     final_col = mix(final_col, near_ref.rgb, near_ref.a);
     border = max(border, near_ref.a);
-
     return vec4(final_col, border);
 }
 
 vec4 cristal_shader(vec3 fragpos, vec3 normal, vec4 color, vec3 sky_reflection, float fresnel, float visible_sky, float dither, vec3 light_color) {
     vec4 reflection = vec4(0.0);
     float infinite = 0.0;
-    
     #if REFLECTION == 1
         reflection = cristal_reflection_calc(fragpos, normal, infinite, dither);
     #endif
-    
     sky_reflection = mix(color.rgb, sky_reflection, visible_sky * visible_sky);
     reflection.rgb = mix(sky_reflection, reflection.rgb, reflection.a);
     color.rgb = mix(color.rgb, sky_reflection, fresnel);
     color.rgb = mix(color.rgb, reflection.rgb, fresnel);
     color.a = mix(color.a, 1.0, fresnel * .9);
-    
     #if SUN_REFLECTION == 1 && !defined(NETHER) && !defined(THE_END)
          return color + vec4(mix(vec3(sun_reflection(reflect(normalize(fragpos), normal)) * light_color * visible_sky), vec3(0.0), reflection.a), 0.0);
     #else
