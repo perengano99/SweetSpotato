@@ -25,6 +25,10 @@ uniform float rainStrength;
 uniform mat4 gbufferProjectionInverse;
 uniform float frameTimeCounter;
 
+uniform int biome;
+uniform int biome_category;
+uniform float rainfall;
+
 #ifdef DISTANT_HORIZONS
     uniform int dhRenderDistance;
 #endif

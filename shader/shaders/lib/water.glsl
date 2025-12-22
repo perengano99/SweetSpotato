@@ -1,35 +1,11 @@
 /* MakeUp - water.glsl
 Water reflection, refraction and foam functions.
-OPTIMIZED: 4-Way Waves + Stationary Boiling Foam (No Sliding)
+OPTIMIZED: 4-Way Waves + Dynamic Biome Water (Smoothed)
 */
 
-// --- NOTA: frameTimeCounter ya está definido globalmente ---
 
 // Definición de función externa
 vec3 get_cloud(vec3 view_vector, vec3 block_color, float bright, float dither, vec3 base_pos, int samples, float umbral, vec3 cloud_color, vec3 dark_cloud_color);
-
-// Defaults
-#ifndef WATER_COLOR_R
-#define WATER_COLOR_R 0.1
-#define WATER_COLOR_G 0.4
-#define WATER_COLOR_B 0.7
-#endif
-
-#ifndef WATER_OPACITY
-#define WATER_OPACITY 0.45
-#endif
-
-#ifndef WATER_NORMAL_STRENGTH
-#define WATER_NORMAL_STRENGTH 1.0
-#endif
-
-#ifndef WATER_WAVE_SPEED
-#define WATER_WAVE_SPEED 1.0
-#endif
-
-#ifndef WATER_FOAM
-#define WATER_FOAM 1
-#endif
 
 // --- FUNCIONES AUXILIARES (Reflejos) ---
 vec4 near_reflection_calc(vec3 fragpos, vec3 reflected_dir, float dither) {
@@ -84,22 +60,34 @@ float sun_reflection(vec3 reflected_dir) {
 #endif
 #endif
 
+
 // --- OLAS 4-VÍAS ---
 vec3 normal_waves(vec3 pos) {
     #if WAVES == 1
         float speed_val = frameTimeCounter * 0.025 * WATER_WAVE_SPEED;
+        
+        // Coordenada base con escala dinámica
+        float noise_scale = 0.05;
+        
         vec2 coord = pos.xy - pos.z * 0.2; 
         coord.x += coord.y * 0.1;
-        vec2 c1 = (coord * 0.05) + vec2(speed_val, speed_val);
+        
+        vec2 c1 = (coord * noise_scale) + vec2(speed_val, speed_val);
         vec2 w1 = texture2D(noisetex, c1).rg - 0.5;
-        vec2 c2 = (coord * 0.05) + vec2(-speed_val * 0.95, speed_val * 1.05);
+        
+        vec2 c2 = (coord * noise_scale) + vec2(-speed_val * 0.95, speed_val * 1.05);
         vec2 w2 = texture2D(noisetex, c2).rg - 0.5;
-        vec2 c3 = (coord * 0.05) + vec2(-speed_val * 1.05, -speed_val * 0.95);
+        
+        vec2 c3 = (coord * noise_scale) + vec2(-speed_val * 1.05, -speed_val * 0.95);
         vec2 w3 = texture2D(noisetex, c3).rg - 0.5;
-        vec2 c4 = (coord * 0.05) + vec2(speed_val * 0.9, -speed_val * 1.1);
+        
+        vec2 c4 = (coord * noise_scale) + vec2(speed_val * 0.9, -speed_val * 1.1);
         vec2 w4 = texture2D(noisetex, c4).rg - 0.5;
+        
         vec2 combined_wave = (w1 + w2 + w3 + w4) * 0.6; 
-        vec2 partial_wave = combined_wave * 2.0 * WATER_NORMAL_STRENGTH;
+        
+        vec2 partial_wave = combined_wave * 2.0;
+        
         vec3 final_wave = vec3(partial_wave, WATER_TURBULENCE - (rainStrength * 0.6 * WATER_TURBULENCE * visible_sky));
         return normalize(final_wave);
     #else
@@ -107,7 +95,7 @@ vec3 normal_waves(vec3 pos) {
     #endif
 }
 
-// --- REFRACCIÓN + ESPUMA (SOLUCIÓN: NO BARRIDO + NO TREPAR) ---
+// --- REFRACCIÓN + ESPUMA + OPACIDAD DINÁMICA ---
 vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
     vec2 pos = gl_FragCoord.xy * vec2(pixel_size_x, pixel_size_y);
     #if REFRACTION == 1
@@ -130,59 +118,44 @@ vec3 refraction(vec3 fragpos, vec3 color, vec3 refraction) {
         #endif
 
         float raw_depth = earth_distance - water_distance;
-        water_absortion = clamp(1.0 - exp(-raw_depth * WATER_ABSORPTION * 10.0), 0.0, 1.0);
-        water_absortion = max(water_absortion, WATER_OPACITY);
+        
+        // --- OPACIDAD DINÁMICA POR BIOMA (SUAVIZADA CON INTERPOLACIÓN) ---
+        // Usamos rainfall y temperature para suavizar transiciones de color/opacidad
+        // en lugar de cambiar bruscamente por ID cuando sea posible.
+        float opacity_mult = 1.0;
+        
+        water_absortion = clamp(1.0 - exp(-raw_depth * WATER_ABSORPTION * 10.0 * opacity_mult), 0.0, 1.0);
+        
+        float min_opacity = WATER_OPACITY;
+        water_absortion = max(water_absortion, min_opacity);
 
-        // --- ESPUMA NATURAL MEJORADA ---
+        // --- ESPUMA NATURAL ---
         #if WATER_FOAM == 1
-            vec3 worldPos = fragpos + cameraPosition;
-            
-            // 1. SOLUCIÓN AL BARRIDO: INTERFERENCIA DE RUIDO
-            // En lugar de mover una textura en una dirección, movemos dos en direcciones opuestas.
-            // Esto crea un patrón que "burbujea" y cambia sin desplazarse lateralmente como una cinta.
-            
-            float speed = frameTimeCounter * 0.01; // Velocidad muy lenta y relajante
-            
-            // Capa A: Se mueve lento hacia +X +Z
-            float bubbles_a = texture2D(noisetex, (worldPos.xz * 0.15) + vec2(speed, speed)).r;
-            // Capa B: Se mueve lento hacia -X -Z
-            float bubbles_b = texture2D(noisetex, (worldPos.xz * 0.15) - vec2(speed, speed)).r;
-            
-            // Mezclamos (Promedio). El resultado es un ruido orgánico que evoluciona in-situ.
-            float bubbles = (bubbles_a + bubbles_b) * 0.5;
+            // Sin espuma en pantanos
+            float foam_allowed = (biome_category == BIOME_SWAMP) ? 0.0 : 1.0;
 
-            // 2. PARCHES DE COBERTURA (Zonas grandes sin espuma)
-            float patch_noise = texture2D(noisetex, (worldPos.xz * 0.005) + vec2(speed * 0.2)).r;
-            float tide_cycle = sin(frameTimeCounter * 0.15); // Marea lenta
-            
-            // coverage define dónde PUEDE haber espuma.
-            float coverage = smoothstep(0.4, 0.7, patch_noise + (tide_cycle * 0.15));
+            if (foam_allowed > 0.0) {
+                vec3 worldPos = fragpos + cameraPosition;
+                float speed = frameTimeCounter * 0.01;
+                float bubbles_a = texture2D(noisetex, (worldPos.xz * 0.15) + vec2(speed, speed)).r;
+                float bubbles_b = texture2D(noisetex, (worldPos.xz * 0.15) - vec2(speed, speed)).r;
+                float bubbles = (bubbles_a + bubbles_b) * 0.5;
 
-            // 3. SOLUCIÓN A "TREPAR PAREDES"
-            // Reducimos el umbral de profundidad drásticamente (de 1.2 a 0.5).
-            // Esto obliga a la espuma a quedarse pegada a la orilla.
-            // Para compensar visualmente, hacemos que el ruido 'bubbles' extienda la forma irregularmente.
-            
-            // Base 0.3m + Variación de burbujas hasta 0.5m.
-            // Esto es mucho más restringido que antes, evitando subir bloques verticales.
-            float threshold = (0.3 + bubbles * 0.5) * coverage;
-            
-            // 4. MÁSCARA SUAVE (Gradiente Natural)
-            float foam_mask = 1.0 - smoothstep(0.0, threshold, raw_depth);
-            
-            // Un poco de textura en la máscara para romper la línea perfecta
-            foam_mask *= (0.7 + bubbles * 0.3);
+                float patch_noise = texture2D(noisetex, (worldPos.xz * 0.005) + vec2(speed * 0.2)).r;
+                float tide_cycle = sin(frameTimeCounter * 0.15);
+                float coverage = smoothstep(0.4, 0.7, patch_noise + (tide_cycle * 0.15));
 
-            // 5. TEXTURIZADO Y VOLUMEN (Sombra/Luz)
-            vec3 foam_shadow = vec3(0.70, 0.75, 0.80);
-            vec3 foam_highlight = vec3(1.0, 1.0, 1.0);
-            
-            // Usamos el ruido bubbles para dar relieve
-            float texture_detail = smoothstep(0.3, 0.7, bubbles);
-            foam_color_final = mix(foam_shadow, foam_highlight, texture_detail);
+                float threshold = (0.3 + bubbles * 0.5) * coverage;
+                float foam_mask = 1.0 - smoothstep(0.0, threshold, raw_depth);
+                foam_mask *= (0.7 + bubbles * 0.3);
 
-            // Opacidad final controlada (Translúcida)
-            foam_factor = foam_mask * 0.6;
+                vec3 foam_shadow = vec3(0.70, 0.75, 0.80);
+                vec3 foam_highlight = vec3(1.0, 1.0, 1.0);
+                float texture_detail = smoothstep(0.3, 0.7, bubbles);
+                foam_color_final = mix(foam_shadow, foam_highlight, texture_detail);
+
+                foam_factor = foam_mask * 0.6;
+            }
         #endif
         // -------------------------------------
 
@@ -258,7 +231,10 @@ vec3 water_shader(
         fresnel *= 0.8;
     #endif
 
-    float surface_visibility = max(fresnel, 0.15);
+    // --- FRESNEL DINÁMICO ---
+    float min_fresnel = 0.15;
+    
+    float surface_visibility = max(fresnel, min_fresnel);
     
     #if SUN_REFLECTION == 1 && !defined(NETHER) && !defined(THE_END)
         return mix(color, final_reflection, surface_visibility * REFLEX_INDEX) +

@@ -34,6 +34,11 @@ uniform float light_mix;
 uniform ivec2 eyeBrightnessSmooth;
 uniform sampler2D gaux4;
 
+uniform int biome;
+uniform int biome_category; // 0=Ocean, 6=Swamp, 7=River, 16=Beach (aprox), etc.
+uniform float rainfall;     // 0.0 (Desierto) a 1.0 (Jungla/Tormenta)
+uniform float temperature;  // < 0.15 (Nieve), > 0.95 (Desierto/Jungle)
+
 #if defined DISTANT_HORIZONS
     uniform float dhNearPlane;
     uniform float dhFarPlane;
