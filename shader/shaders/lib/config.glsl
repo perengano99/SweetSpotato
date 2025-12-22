@@ -293,7 +293,7 @@ const float shadowDistance = 60.0;
 //----------------------------------------
 // VOLUMETRIC LIGHTING
 //----------------------------------------
-#define VOL_LIGHT 1 // [0 1 2]
+#define VOL_LIGHT 2 // [0 1 2]
 
 //----------------------------------------
 // CLOUDS
@@ -346,8 +346,8 @@ const float shadowDistance = 60.0;
 //----------------------------------------
 // GODRAYS
 //----------------------------------------
-#define GODRAY_STEPS 6 // [4 5 6 8 10 12 16]
-#define CHEAP_GODRAY_SAMPLES 6 // [4 6 8 10 12]
+#define GODRAY_STEPS 40 // [4 5 6 8 10 12 16 40]
+#define CHEAP_GODRAY_SAMPLES 40 // [4 6 8 10 12 40]
 #define VOL_LIGHT_STRENGTH 1.0 // [0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.5 2.0]
 
 //----------------------------------------
@@ -355,7 +355,7 @@ const float shadowDistance = 60.0;
 //----------------------------------------
 #define COLOR_SCHEME 1
 
-#define NIGHT_BRIGHT 0.40
+#define NIGHT_BRIGHT 0.1
 
 // Custom colors
 #define LIGHT_SUNSET_COLOR_R 1
@@ -410,7 +410,7 @@ const float shadowDistance = 60.0;
 const float eyeBrightnessHalflife = 3.0;
 const float centerDepthHalflife = 0.66;
 
-#define AVOID_DARK_LEVEL 0.005
+#define AVOID_DARK_LEVEL 0.001
 
 // --- OPTIMIZATION: Raymarch Steps ---
 #define RAYMARCH_STEPS 5

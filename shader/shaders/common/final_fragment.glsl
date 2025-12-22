@@ -111,8 +111,20 @@ void main() {
         #endif
     #endif
     
-    // Exposure correction
-    block_color *= vec3(exposure);
+    // --- CORRECCIÓN CRÍTICA SWEETSPOTATO ---
+    // El problema: 'exposure' sube demasiado en cuevas, matando el contraste.
+    // Solución: Limitamos cuánto puede "abrirse" el ojo.
+    
+    // Ajusta este 1.5 a gusto. 
+    // 1.0 = Sin visión nocturna automática (Cuevas muy oscuras).
+    // 2.0 = Adaptación moderada.
+    // >3.0 = El valor original que causaba el problema.
+    float max_exposure = 1.3; 
+    
+    float clamped_exposure = min(exposure, max_exposure);
+    block_color *= vec3(clamped_exposure);
+
+    // Tone Mapping
     block_color = custom_sigmoid(block_color);
 
     // Color-grading -----
