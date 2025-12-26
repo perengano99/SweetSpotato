@@ -77,7 +77,16 @@ const bool gaux4Clear = false;
 
 uniform sampler2D gaux3;
 uniform sampler2D colortex1;
+uniform sampler2D depthtex0;
 uniform float viewWidth;
+
+// Uniforms para bloom solar/lunar
+uniform mat4 gbufferModelView;
+uniform mat4 gbufferModelViewInverse;
+uniform mat4 gbufferProjection;
+uniform mat4 gbufferProjectionInverse;
+uniform vec3 sunPosition;
+uniform float light_mix;
 
 #if AA_TYPE == 3
     uniform float pixel_size_x;
@@ -510,6 +519,8 @@ void main() {
     // Tone Mapping
     block_color = custom_sigmoid(block_color);
 
+    
+
     // Color-grading -----
     // DEVELOPER: If your post processing effect only involves the current pixel,
     // it can be placed here. For example:
@@ -522,6 +533,180 @@ void main() {
     #ifdef COLOR_BLINDNESS
         block_color = color_blindness(block_color);
     #endif
+
+    // ===== BLOOM SOLAR/LUNAR GLOBAL (DESPUÉS DE TODO POST-PROCESSING) =====
+    // Aplicado directamente como BLOOM ADITIVO a la imagen final
+    // Afecta TODA la pantalla cuando miras al sol/luna
+    
+    #if SUN_MOON_BLOOM_ENABLED == 1
+    // Calcular la dirección de vista correctamente desde el pixel central de la pantalla
+    vec3 viewPos = vec3(0.0, 0.0, -1.0); // Pixel central en view space (negativo = hacia adelante)
+    vec3 camera_forward = normalize(mat3(gbufferModelViewInverse) * viewPos);
+    
+    // Dirección del sol en world space - sunPosition ya viene en view space
+    vec3 sun_direction = normalize(mat3(gbufferModelViewInverse) * sunPosition);
+    vec3 moon_direction = -sun_direction;
+    
+    // Proyectar posición del sol/luna a coordenadas de pantalla para gradiente radial
+    vec4 sun_viewPos = vec4(sunPosition, 1.0);
+    vec4 sun_clipPos = gbufferProjection * sun_viewPos;
+    vec3 sun_ndc = sun_clipPos.xyz / sun_clipPos.w;
+    vec2 sun_screenPos = sun_ndc.xy * 0.5 + 0.5; // Convertir de NDC [-1,1] a UV [0,1]
+    
+    vec4 moon_viewPos = vec4(-sunPosition, 1.0);
+    vec4 moon_clipPos = gbufferProjection * moon_viewPos;
+    vec3 moon_ndc = moon_clipPos.xyz / moon_clipPos.w;
+    vec2 moon_screenPos = moon_ndc.xy * 0.5 + 0.5;
+    
+    // Distancia en pantalla desde el pixel actual al sol/luna
+    vec2 toSun = texcoord - sun_screenPos;
+    vec2 toMoon = texcoord - moon_screenPos;
+    float distToSun = length(toSun);
+    float distToMoon = length(toMoon);
+    
+    // Verificación mejorada de visibilidad:
+    // El sol/luna deben estar en el hemisferio superior (Y > 0)
+    // Y la cámara debe estar mirando aproximadamente en esa dirección
+    
+    float camera_looking_up = camera_forward.y; // Positivo = mirando arriba, negativo = mirando abajo
+    float sun_above_horizon = sun_direction.y; // Positivo = sol arriba, negativo = sol abajo
+    float moon_above_horizon = moon_direction.y; // Positivo = luna arriba, negativo = luna abajo
+    
+    // Transición suave desde el horizonte: 
+    // -0.15 = completamente invisible (debajo del horizonte)
+    // 0.0 = horizonte (comienza a aparecer)
+    // 0.15+ = completamente visible
+    float sun_horizon_fade = smoothstep(-0.15, 0.15, sun_above_horizon);
+    float moon_horizon_fade = smoothstep(-0.15, 0.15, moon_above_horizon);
+    
+    // Fade de la cámara: permite el efecto si no miramos demasiado abajo
+    float camera_fade = smoothstep(-0.5, 0.0, camera_looking_up);
+    
+    // Visibilidad combinada: ambos fades se multiplican para transición suave
+    float sun_visibility = sun_horizon_fade * camera_fade;
+    float moon_visibility = moon_horizon_fade * camera_fade;
+    
+    // Gradiente radial más sutil: efecto más amplio y gradual
+    // Usamos una curva exponencial para un fade más natural
+    float sun_radial_fade = exp(-distToSun * 1.5); // Decaimiento exponencial suave
+    float moon_radial_fade = exp(-distToMoon * 1.8); // Ligeramente más concentrado para la luna
+    
+    // Ángulo entre la dirección de vista y el sol/luna (dot product: 1.0 = mirando directo, -1.0 = opuesto)
+    float sun_angle = dot(camera_forward, sun_direction);
+    float moon_angle = dot(camera_forward, moon_direction);
+    
+    // Falloff suave y coherente basado en proximidad angular
+    // Solo valores positivos (cuando miramos hacia el sol, no en dirección opuesta)
+    float sun_proximity = max(0.0, sun_angle) * sun_visibility;
+    float moon_proximity = max(0.0, moon_angle) * moon_visibility;
+    
+    // Aplicar falloff: pow controla qué tan concentrado está el efecto cerca del sol
+    // Valores altos = más concentrado, valores bajos = más disperso
+    float sun_glow = pow(sun_proximity, GLOW_FALLOFF_SUN);
+    float moon_glow = pow(moon_proximity, GLOW_FALLOFF_MOON);
+    
+    // Combinar el glow angular con el gradiente radial en pantalla
+    sun_glow *= sun_radial_fade;
+    moon_glow *= moon_radial_fade;
+    
+    // Colores del bloom más sutiles y realistas según hora del día
+    // Sol: Cálido al amanecer/atardecer, blanco-amarillo al mediodía
+    float sunset_influence = 4.0 * light_mix * (1.0 - light_mix); // Pico en amanecer/atardecer
+    float midday = smoothstep(0.4, 0.6, light_mix); // 1.0 al mediodía
+    
+    vec3 sunrise_color = vec3(1.0, 0.4, 0.2); // Naranja cálido
+    vec3 midday_color = vec3(1.0, 0.95, 0.8); // Blanco-amarillo suave
+    vec3 sunset_color = vec3(1.2, 0.5, 0.2); // Naranja-rojo
+    
+    vec3 sun_bloom_color = mix(sunrise_color, midday_color, midday);
+    sun_bloom_color = mix(sun_bloom_color, sunset_color, sunset_influence * 0.5);
+    
+    // Luna: bloom azul plateado muy sutil, solo visible de noche
+    float night_factor = 1.0 - clamp(light_mix, 0.0, 1.0);
+    night_factor = smoothstep(0.0, 0.3, night_factor); // Solo en noche profunda
+    
+    vec3 moon_bloom_color = vec3(0.3, 0.35, 0.5) * night_factor; // Azul plateado muy desaturado
+    
+    // Fuerzas del efecto (ADITIVAS) - ajustadas para ser más coherentes
+    float sun_bloom_strength = sun_glow * SUN_TINT_STRENGTH;
+    float moon_bloom_strength = moon_glow * MOON_TINT_STRENGTH * night_factor;
+    
+    // DEBUG: Mostrar visualización del ángulo y glow (COMPLETO CON VALORES)
+    #ifdef SUN_MOON_BLOOM_DEBUG
+        // Panel de debug en esquina superior izquierda (0.0-0.35 x, 0.65-1.0 y)
+        if(texcoord.x < 0.35 && texcoord.y > 0.65) {
+            vec3 debug_color = vec3(0.0);
+            
+            // BARRA 1: sun_above_horizon (rojo/negro) - Y del sol
+            if(texcoord.y > 0.95 && texcoord.y < 0.98) {
+                float normalized = sun_above_horizon * 0.5 + 0.5; // -1..1 -> 0..1
+                if(texcoord.x < normalized * 0.35) {
+                    debug_color = sun_above_horizon > 0.0 ? vec3(2.0, 0.0, 0.0) : vec3(0.0, 2.0, 0.0);
+                }
+            }
+            
+            // BARRA 2: moon_above_horizon (azul/negro) - Y de la luna
+            if(texcoord.y > 0.91 && texcoord.y < 0.94) {
+                float normalized = moon_above_horizon * 0.5 + 0.5;
+                if(texcoord.x < normalized * 0.35) {
+                    debug_color = moon_above_horizon > 0.0 ? vec3(0.0, 0.0, 2.0) : vec3(0.0, 2.0, 0.0);
+                }
+            }
+            
+            // BARRA 3: camera_looking_up (blanco/negro) - Y de la cámara
+            if(texcoord.y > 0.87 && texcoord.y < 0.90) {
+                float normalized = camera_looking_up * 0.5 + 0.5;
+                if(texcoord.x < normalized * 0.35) {
+                    debug_color = camera_looking_up > 0.0 ? vec3(2.0, 2.0, 2.0) : vec3(2.0, 0.0, 2.0);
+                }
+            }
+            
+            // BARRA 4: sun_visibility (naranja)
+            if(texcoord.y > 0.83 && texcoord.y < 0.86) {
+                if(texcoord.x < sun_visibility * 0.35) {
+                    debug_color = vec3(2.0, 1.0, 0.0);
+                }
+            }
+            
+            // BARRA 5: moon_visibility (cian)
+            if(texcoord.y > 0.79 && texcoord.y < 0.82) {
+                if(texcoord.x < moon_visibility * 0.35) {
+                    debug_color = vec3(0.0, 1.5, 2.0);
+                }
+            }
+            
+            // BARRA 6: sun_bloom_strength (amarillo)
+            if(texcoord.y > 0.75 && texcoord.y < 0.78) {
+                if(texcoord.x < sun_bloom_strength * 3.0) {
+                    debug_color = vec3(2.0, 2.0, 0.0);
+                }
+            }
+            
+            // BARRA 7: moon_bloom_strength (morado)
+            if(texcoord.y > 0.71 && texcoord.y < 0.74) {
+                if(texcoord.x < moon_bloom_strength * 3.0) {
+                    debug_color = vec3(1.5, 0.0, 2.0);
+                }
+            }
+            
+            // BARRA 8: light_mix (gris)
+            if(texcoord.y > 0.67 && texcoord.y < 0.70) {
+                if(texcoord.x < light_mix * 0.35) {
+                    debug_color = vec3(1.5, 1.5, 1.5);
+                }
+            }
+            
+            if(length(debug_color) > 0.0) {
+                block_color = debug_color;
+            }
+        }
+    #endif
+    
+    // BLOOM ADITIVO: sumar color brillante cuando miras al sol/luna
+    block_color += sun_bloom_color * sun_bloom_strength;
+    block_color += moon_bloom_color * moon_bloom_strength;
+    #endif
+    // ===== FIN BLOOM SOLAR/LUNAR =====
 
     #ifdef DEBUG_MODE
         if(texcoord.x < 0.5 && texcoord.y < 0.5) {

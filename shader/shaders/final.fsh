@@ -528,6 +528,74 @@ void main() {
         block_color = color_blindness(block_color);
     #endif
 
+    // ===== BLOOM SOLAR/LUNAR GLOBAL (DESPUÉS DE TODO POST-PROCESSING) =====
+    // Aplicado directamente como BLOOM ADITIVO a la imagen final
+    // Afecta TODA la pantalla cuando miras al sol/luna
+    
+    #ifdef SUN_MOON_BLOOM_ENABLED
+    vec3 camera_forward = normalize(-gbufferModelView[2].xyz);
+    vec3 sun_direction = normalize(sunPosition);
+    vec3 moon_direction = -normalize(sunPosition);
+    
+    // Ángulo entre la dirección de vista y el sol/luna
+    float sun_angle = dot(camera_forward, sun_direction);
+    float moon_angle = dot(camera_forward, moon_direction);
+    
+    // Falloff SUAVE pero dramatico
+    float sun_glow = max(0.0, sun_angle);
+    sun_glow = pow(sun_glow, GLOW_FALLOFF_SUN) * pow(sun_glow, 3.0);
+    
+    float moon_glow = max(0.0, moon_angle);
+    moon_glow = pow(moon_glow, GLOW_FALLOFF_MOON) * pow(moon_glow, 3.0);
+    
+    // Colores del bloom según hora del día (más saturados y brillantes)
+    float sunset_influence = 4.0 * light_mix * (1.0 - light_mix);
+    vec3 sun_bloom_color = mix(vec3(2.0, 0.4, 0.1), vec3(2.0, 1.5, 0.5), sunset_influence);
+    
+    // Luna: bloom azul frío, solo en la noche
+    float night_factor = 1.0 - clamp(light_mix, 0.0, 1.0);
+    vec3 moon_bloom_color = mix(vec3(0.3, 0.6, 1.5), vec3(0.6, 0.9, 2.0), night_factor) * night_factor;
+    
+    // Fuerzas del efecto (ADITIVAS, no multiplicativas)
+    float sun_bloom_strength = sun_glow * SUN_TINT_STRENGTH * 0.5;
+    float moon_bloom_strength = moon_glow * MOON_TINT_STRENGTH * 0.3;
+    
+    // DEBUG: Mostrar visualización del ángulo y glow
+    #ifdef SUN_MOON_BLOOM_DEBUG
+        // Mostrar en la esquina superior izquierda
+        if(texcoord.x < 0.2 && texcoord.y > 0.8) {
+            // Verde = mapa de la pantalla (para ver posición)
+            // Rojo en eje X = sol_angle (más a la derecha = más mirando al sol)
+            // Azul en eje Y = moon_angle (más arriba = más mirando a la luna)
+            vec3 debug_color = vec3(0.0);
+            
+            // Mapa de ángulos: X = sun_angle, Y = moon_angle
+            if(texcoord.x < 0.1 && texcoord.y > 0.85) {
+                // Mini gráfico: rojo = sun_angle
+                float local_x = (texcoord.x - 0.0) / 0.1;
+                float local_y = (texcoord.y - 0.85) / 0.15;
+                if(local_x < (sun_angle * 0.5 + 0.5) && abs(local_y - 0.5) < 0.05) {
+                    debug_color = vec3(1.0, 0.0, 0.0) * max(0.0, sun_angle);
+                }
+            }
+            if(texcoord.x > 0.1 && texcoord.x < 0.2 && texcoord.y > 0.85) {
+                // Mini gráfico: azul = moon_angle
+                float local_x = (texcoord.x - 0.1) / 0.1;
+                float local_y = (texcoord.y - 0.85) / 0.15;
+                if(local_x < (moon_angle * 0.5 + 0.5) && abs(local_y - 0.5) < 0.05) {
+                    debug_color = vec3(0.0, 0.0, 1.0) * max(0.0, moon_angle);
+                }
+            }
+            block_color = mix(block_color, debug_color, 0.8);
+        }
+    #endif
+    
+    // BLOOM ADITIVO: sumar color brillante cuando miras al sol/luna
+    block_color += sun_bloom_color * sun_bloom_strength;
+    block_color += moon_bloom_color * moon_bloom_strength;
+    #endif
+    // ===== FIN BLOOM SOLAR/LUNAR =====
+
     #ifdef DEBUG_MODE
         if(texcoord.x < 0.5 && texcoord.y < 0.5) {
             block_color = texture2D(shadowtex1, texcoord * 2.0).rrr;

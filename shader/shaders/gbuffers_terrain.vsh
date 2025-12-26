@@ -1290,10 +1290,26 @@ if (dot(normal, normal) > 0.0001) { // Workaround for undefined normals
     direct_light_strength = sun_light_strength;
 #else
     direct_light_strength = mix(-sun_light_strength, sun_light_strength, light_mix);
+
+    // Modulación por hora del día (intensidad solar)
+    // Usa la elevación del sol para atenuar amanecer/atardecer y potenciar mediodía
+    // Curva de tiempo solar más cinematográfica y suave
+    float sun_time = clamp(sun_vec.y, 0.0, 1.0);
+    sun_time = smoothstep(0.0, 1.0, sun_time);
+    float sun_time_intensity = pow(sun_time, 0.6);
+    direct_light_strength *= sun_time_intensity;
+    // Ajuste leve al omni para mantener base luminosa estable
+    // No exceder 1.0 ni oscurecer en exceso en amanecer/atardecer
+    float omni_time = mix(0.85, 1.0, sun_time_intensity);
+    // omni_strength se define más abajo; aplicamos factor después del cálculo primario
 #endif
 
 // Omni light intensity changes by angle
 float omni_strength = (direct_light_strength * .125) + 1.0;
+
+#if !defined THE_END && !defined NETHER
+    omni_strength *= omni_time;
+#endif
 
 // Direct light color
 #ifdef UNKNOWN_DIM

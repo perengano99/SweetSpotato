@@ -1190,6 +1190,20 @@ void main() {
         #endif
 
         block_color.rgb *= mix(real_light, vec3(1.0), nightVision * 0.125);
+
+        // Tinte del suelo por hora del día (ultra-rendimiento)
+        // Usa 'light_mix' para interpolar noche/día y resalta atardecer/amanecer con campana ligera
+        vec3 TINT_DAY    = vec3(LIGHT_DAY_COLOR_R,    LIGHT_DAY_COLOR_G,    LIGHT_DAY_COLOR_B);
+        vec3 TINT_NIGHT  = vec3(LIGHT_NIGHT_COLOR_R,  LIGHT_NIGHT_COLOR_G,  LIGHT_NIGHT_COLOR_B);
+        vec3 TINT_SUNSET = vec3(LIGHT_SUNSET_COLOR_R, LIGHT_SUNSET_COLOR_G, LIGHT_SUNSET_COLOR_B);
+
+        float sunset_factor = clamp(4.0 * light_mix * (1.0 - light_mix), 0.0, 1.0);
+        vec3 base_tint = mix(TINT_NIGHT, TINT_DAY, clamp(light_mix, 0.0, 1.0));
+        vec3 ground_tint = mix(base_tint, TINT_SUNSET, sunset_factor);
+
+        float ground_tint_strength = GROUND_TINT_STRENGTH;
+        block_color.rgb = mix(block_color.rgb, block_color.rgb * clamp(ground_tint, vec3(0.2), vec3(2.0)), ground_tint_strength);
+
         block_color.rgb *= mix(vec3(1.0, 1.0, 1.0), vec3(NV_COLOR_R, NV_COLOR_G, NV_COLOR_B), nightVision);
     #endif
 
