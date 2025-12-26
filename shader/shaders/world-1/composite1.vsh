@@ -9,4 +9,17 @@ Javier Garduño - GNU Lesser General Public License v3.0
 #define COMPOSITE1_SHADER
 #define NO_SHADOWS
 
-#include "/common/composite1_vertex.glsl"
+// BEGIN INLINE /common/composite1_vertex.glsl
+#include "/lib/config.glsl"
+
+/* Ins / Outs */
+
+varying vec2 texcoord;
+
+// MAIN FUNCTION ------------------
+
+void main() {
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    texcoord = gl_MultiTexCoord0.xy;
+}
+// END INLINE /common/composite1_vertex.glsl

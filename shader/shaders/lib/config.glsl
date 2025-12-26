@@ -56,6 +56,9 @@ OPTIMIZED FOR GTX 1650 / Low-End GPUs
 
 #define BLACK_ENTITY_FIX 0
 
+// Compatibilidad/Modo básico de sombreado (ruta ligera)
+#define USE_BASIC_SH 0 // [0 1]
+
 const float sunPathRotation = -25.0;
 
 #define BLOCKLIGHT_TEMP 1
@@ -86,6 +89,8 @@ const float sunPathRotation = -25.0;
 
 #define SUN_REFLECTION 1 // [0 1]
 #define DYNAMIC_SUN_REFLECTION 1 // [0 1]
+// Proyección/reflexión de agua: 0 = simple, 1 = proyectiva
+#define WATER_REFLECTION_PROJECTION 1 // [0 1]
 
 //----------------------------------------
 // FOG
@@ -297,6 +302,8 @@ const float shadowDistance = 60.0;
 
 #define GODRAY_STEPS 32 // [4 8 12 16 20 24 32 40 48 64 80 128]
 #define VOL_LIGHT_STRENGTH 1 // [0.5 0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.5 2.0]
+// Muestras baratas para godrays (reduce coste manteniendo forma)
+#define CHEAP_GODRAY_SAMPLES 0 // [0 1]
 
 //----------------------------------------
 // CLOUDS
@@ -401,6 +408,8 @@ const float shadowDistance = 60.0;
 // COLORBLIND
 //----------------------------------------
 #define COLOR_BLIND_MODE 0
+// Toggle general de modo daltonismo
+#define COLOR_BLINDNESS 0 // [0 1]
 
 //----------------------------------------
 // PERFORMANCE & OPTIMIZATION
